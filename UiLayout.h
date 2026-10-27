@@ -75,6 +75,26 @@ inline void drawCenteredText(Adafruit_GFX &d, const char *text, int16_t cx,
   d.print(text);
 }
 
+// Bold text: the same string printed twice, 1 px apart, which
+// thickens every vertical stroke (the built-in font has no size
+// between 1 and 2). Used for the current Hijri month and the current
+// prayer, so they stand out from the other cells. The ink is 1 px
+// wider than the regular text.
+inline void drawBoldText(Adafruit_GFX &d, const char *text, int16_t x,
+                         int16_t y) {
+  d.setCursor(x, y);
+  d.print(text);
+  d.setCursor(x + 1, y);
+  d.print(text);
+}
+
+inline void drawCenteredBold(Adafruit_GFX &d, const char *text, int16_t cx,
+                             int16_t topY, uint8_t size) {
+  qwSetText(d, size);
+  int16_t w = qwTextInkWidth((uint8_t)strlen(text), size) + 1;
+  drawBoldText(d, text, cx - w / 2, topY);
+}
+
 // Draws a thick vertical progress bar. Fill grows from the bottom.
 inline void drawVerticalBar(Adafruit_GFX &d, int16_t x, int16_t y,
                              int16_t w, int16_t h, uint8_t percent) {
@@ -289,7 +309,11 @@ inline void drawZoneHijriGrid(Adafruit_GFX &d, const HijriDate &hijri) {
       d.setTextColor(isCurrent ? qwPaper() : qwInk());
       char buf[4];
       snprintf(buf, sizeof(buf), "%02d", monthNum);
-      drawCenteredText(d, buf, cellCx, cellCy - qwTextHeight(1) / 2, 1);
+      if (isCurrent) {
+        drawCenteredBold(d, buf, cellCx, cellCy - qwTextHeight(1) / 2, 1);
+      } else {
+        drawCenteredText(d, buf, cellCx, cellCy - qwTextHeight(1) / 2, 1);
+      }
     }
   }
   d.setTextColor(qwInk());
@@ -459,10 +483,15 @@ inline void drawZonePrayerTimes(Adafruit_GFX &d, const PrayerTimesResult &t,
 
     qwSetText(d, 1);
     d.setTextColor(isCurrent ? qwPaper() : qwInk());
-    int16_t textW = qwTextInkWidth((uint8_t)strlen(buf), 1);
-    d.setCursor(x0 + (x1 - x0 - textW) / 2,
-                y0 + (y1 - y0 - qwTextHeight(1)) / 2);
-    d.print(buf);
+    int16_t textW = qwTextInkWidth((uint8_t)strlen(buf), 1) + (isCurrent ? 1 : 0);
+    int16_t tx = x0 + (x1 - x0 - textW) / 2;
+    int16_t ty = y0 + (y1 - y0 - qwTextHeight(1)) / 2;
+    if (isCurrent) {
+      drawBoldText(d, buf, tx, ty);
+    } else {
+      d.setCursor(tx, ty);
+      d.print(buf);
+    }
   }
   d.setTextColor(qwInk());
 }
