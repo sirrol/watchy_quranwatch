@@ -19,6 +19,8 @@
                          (accelerates the longer you hold - see
                          qwAccelStep)
     DOWN  press/hold  : move selection down / decrease value
+    BACK  long press (3s), from watch face only:
+                       -> contemplation mode (Ulam spiral, see Spiral.h)
     BACK  short press : save & return to the watch face from any
                          screen; returns to the watch face (not
                          the menu) from the main menu too
@@ -31,6 +33,10 @@
 #include "AppConfig.h"
 #include "QuranData.h"
 #include "Storage.h"
+#include "SurahNames.h"
+#include "QuranReader.h"
+#include "Games.h"
+#include "Spiral.h"
 
 #ifndef GxEPD_BLACK
 #define GxEPD_BLACK 0
@@ -49,6 +55,15 @@ inline void qwPrayerBuzz() {
   delay(120);
   digitalWrite(VIB_MOTOR_PIN, HIGH);
   delay(100);
+  digitalWrite(VIB_MOTOR_PIN, LOW);
+}
+
+// Single pulse for the "prayer in less than 45 min" alert (different
+// from the double pulse used at the prayer time itself).
+inline void qwAlertBuzz() {
+  pinMode(VIB_MOTOR_PIN, OUTPUT);
+  digitalWrite(VIB_MOTOR_PIN, HIGH);
+  delay(300);
   digitalWrite(VIB_MOTOR_PIN, LOW);
 }
 
@@ -79,7 +94,12 @@ enum AppScreen : uint8_t {
   SCREEN_SETTINGS,
   SCREEN_SET_TIME,
   SCREEN_SET_DATE,
-  SCREEN_VERSE_EDIT
+  SCREEN_VERSE_EDIT,
+  SCREEN_QURAN_PICK,  // QURAN READER: choose surah and verse
+  SCREEN_QURAN_READ,  // QURAN READER: the text itself
+  SCREEN_GAMES_MENU,  // GAMES: list (top-right button from the watch face)
+  SCREEN_GAME_PLAY,   // GAMES: a game is running
+  SCREEN_SPIRAL       // contemplation: Ulam spiral of the primes (long press BACK)
 };
 
 enum MainMenuItem : uint8_t {
@@ -87,6 +107,7 @@ enum MainMenuItem : uint8_t {
   MENU_SET_TIME,
   MENU_SET_DATE,
   MENU_BOOKMARK,
+  MENU_READER,
   MENU_ITEM_COUNT
 };
 
@@ -99,7 +120,9 @@ enum SettingsField : uint8_t {
   FIELD_ASR_METHOD,
   FIELD_HIJRI_ADJUST,
   FIELD_PRAYER_VIBRATE,
+  FIELD_ALERT_VIBRATE,
   FIELD_INVERT_DISPLAY,
+  FIELD_CLOCK_DRIFT,
   FIELD_COUNT
 };
 
@@ -122,6 +145,10 @@ struct QwCommit {
   bool commitDate = false;
   uint16_t year = 0;
   uint8_t month = 0, day = 0;
+  bool commitBookmark = false; // bookmark actually changed (= a reading)
+  bool spiralReset = false;    // restart the spiral from 1 (main.cpp stores the time)
+  bool commitDrift = false;    // drift setting changed in SETTINGS
+  int16_t oldDriftTenths = 0;  // value it had before (for re-anchoring)
 };
 
 // --- State that must survive deep sleep between button presses ---
@@ -129,6 +156,15 @@ RTC_DATA_ATTR AppScreen qwScreen = SCREEN_WATCHFACE;
 RTC_DATA_ATTR uint8_t qwMenuIndex = 0;
 RTC_DATA_ATTR uint8_t qwSettingsField = 0;
 RTC_DATA_ATTR uint8_t qwVerseSubfield = 0;
+RTC_DATA_ATTR uint8_t qrUnit = 0;     // QURAN READER: 0..36 = surah 78..114, 37 = Ayat al-Kursi
+RTC_DATA_ATTR uint16_t qrVerse = 1;   // verse inside the unit
+RTC_DATA_ATTR uint8_t qrPage = 0;     // page inside the surah (pages are cut from its start)
+RTC_DATA_ATTR uint8_t qwGameMenuIndex = 0;  // GAMES menu selection
+RTC_DATA_ATTR uint8_t qwGameIndex = 0;      // game being played
+RTC_DATA_ATTR bool qwGameLeaveAsk = false;  // "LEAVE GAME?" box is showing
+RTC_DATA_ATTR bool qwSpiralResetAsk = false;  // "RESTART?" box of the spiral is showing
+RTC_DATA_ATTR uint8_t qrField = 0;    // picker: 0 = surah, 1 = verse
+RTC_DATA_ATTR int32_t qwLastInteractMin = 0;  // minute (since 1970) of the last button press
 RTC_DATA_ATTR AppSettings qwTempSettings = DEFAULT_APP_SETTINGS;
 RTC_DATA_ATTR QuranBookmark qwTempBookmark = DEFAULT_BOOKMARK;
 RTC_DATA_ATTR bool qwTempLoaded = false;
@@ -205,9 +241,22 @@ inline void qwAdjustSettingsField(int8_t dir, unsigned long heldMs) {
       qwTempSettings.prayerVibrate = !qwTempSettings.prayerVibrate;
       if (qwTempSettings.prayerVibrate) qwPrayerBuzz(); // preview
       break;
+    case FIELD_ALERT_VIBRATE:
+      qwTempSettings.prayerAlertVibrate = !qwTempSettings.prayerAlertVibrate;
+      if (qwTempSettings.prayerAlertVibrate) qwAlertBuzz(); // preview
+      break;
     case FIELD_INVERT_DISPLAY:
       qwTempSettings.invertDisplay = !qwTempSettings.invertDisplay;
       break;
+    case FIELD_CLOCK_DRIFT: {
+      // 0.1 s/day per tap, 0.5 on a short hold, 2.0 on a long hold.
+      int step = qwAccelStep(heldMs, 1, 5, 20);
+      int v = (int)qwTempSettings.driftTenths + dir * step;
+      if (v < -300) v = -300;
+      if (v > 300) v = 300;
+      qwTempSettings.driftTenths = (int16_t)v;
+      break;
+    }
   }
 }
 
@@ -275,6 +324,39 @@ inline void qwAdjustVerseField(int8_t dir, unsigned long heldMs) {
 }
 
 // ---------------------------------------------------------------
+// QURAN READER state helpers
+// ---------------------------------------------------------------
+inline void qwReaderLoadPosition() {
+  QWStorage::loadReaderPosition(qrUnit, qrVerse);
+  QReader::openAt(qrUnit, qrVerse, qrPage);  // page that starts that verse
+}
+
+inline void qwReaderSavePosition() {
+  QReader::clampPosition(qrUnit, qrVerse);
+  QWStorage::saveReaderPosition(qrUnit, qrVerse);
+}
+
+// Picker: field 0 = surah (cyclic, 37 surahs + Ayat al-Kursi),
+// field 1 = verse (Ayat al-Kursi is a single verse).
+inline void qwAdjustReaderField(int8_t dir, unsigned long heldMs) {
+  if (qrField == 0) {
+    int step = qwAccelStep(heldMs, 1, 3, 6);
+    int u = ((int)qrUnit + dir * step) % QR_UNIT_COUNT;
+    if (u < 0) u += QR_UNIT_COUNT;
+    qrUnit = (uint8_t)u;
+    qrVerse = 1;
+  } else {
+    int step = qwAccelStep(heldMs, 1, 5, 20);
+    int v = (int)qrVerse + dir * step;
+    int maxV = (int)QReader::verseCount(qrUnit);
+    if (v < 1) v = 1;
+    if (v > maxV) v = maxV;
+    qrVerse = (uint16_t)v;
+  }
+  qrPage = 0;
+}
+
+// ---------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------
 inline void qwFieldValueString(char *out, size_t outLen, uint8_t field,
@@ -305,17 +387,26 @@ inline void qwFieldValueString(char *out, size_t outLen, uint8_t field,
     case FIELD_PRAYER_VIBRATE:
       snprintf(out, outLen, "%s", s.prayerVibrate ? "ON" : "OFF");
       break;
+    case FIELD_ALERT_VIBRATE:
+      snprintf(out, outLen, "%s", s.prayerAlertVibrate ? "ON" : "OFF");
+      break;
     case FIELD_INVERT_DISPLAY:
       snprintf(out, outLen, "%s", s.invertDisplay ? "ON" : "OFF");
       break;
+    case FIELD_CLOCK_DRIFT: {
+      int v = s.driftTenths;
+      snprintf(out, outLen, "%c%d.%d s/d", v < 0 ? '-' : '+',
+               abs(v) / 10, abs(v) % 10);
+      break;
+    }
   }
 }
 
 inline const char *qwFieldLabel(uint8_t field) {
   static const char *labels[FIELD_COUNT] = {
-      "LATITUDE",      "LONGITUDE",  "TIME ZONE",    "DST",
+      "LATITUDE",      "LONGITUDE",  "STD TIME ZONE", "DST (+1H)",
       "PRAYER METHOD", "ASR METHOD", "HIJRI ADJUST", "PRAYER VIBRATE",
-      "INVERT DISPLAY"};
+      "45MIN ALERT VIB", "INVERT DISPLAY", "CLOCK DRIFT"};
   return labels[field];
 }
 
@@ -332,7 +423,8 @@ inline void qwDrawMainMenu(Adafruit_GFX &d) {
   qwDrawTitle(d, "MENU");
 
   static const char *items[MENU_ITEM_COUNT] = {"SETTINGS", "SET TIME",
-                                                "SET DATE", "QURAN BOOKMARK"};
+                                                "SET DATE", "QURAN BOOKMARK",
+                                                "QURAN READER"};
   int16_t y = 40;
   for (int i = 0; i < MENU_ITEM_COUNT; i++) {
     bool selected = (i == qwMenuIndex);
@@ -357,12 +449,12 @@ inline void qwDrawSettingsScreen(Adafruit_GFX &d) {
   d.fillScreen(qwPaper());
   qwDrawTitle(d, "SETTINGS");
 
-  int16_t y0 = 34, spacing = 16;
+  int16_t y0 = 29, spacing = 13;
   for (int i = 0; i < FIELD_COUNT; i++) {
     int16_t y = y0 + i * spacing;
     bool selected = (i == qwSettingsField);
     if (selected) {
-      d.fillRect(2, y - 3, 196, 14, qwInk());
+      d.fillRect(2, y - 2, 196, 12, qwInk());
       d.setTextColor(qwPaper());
     } else {
       d.setTextColor(qwInk());
@@ -458,6 +550,60 @@ inline void qwDrawVerseEditScreen(Adafruit_GFX &d) {
   d.print("UP/DOWN=change  MENU=switch  BACK=save");
 }
 
+inline void qwDrawReaderPickScreen(Adafruit_GFX &d) {
+  d.fillScreen(qwPaper());
+  qwDrawTitle(d, "QURAN READER");
+
+  char unitBuf[8], verseBuf[8];
+  if (qrUnit == QReader::UNIT_KURSI) snprintf(unitBuf, sizeof(unitBuf), "AK");
+  else snprintf(unitBuf, sizeof(unitBuf), "%03u",
+                (unsigned)QReader::unitSurah(qrUnit));
+  snprintf(verseBuf, sizeof(verseBuf), "%03u",
+           (unsigned)QReader::verseLabel(qrUnit, qrVerse));
+
+  qwDrawValueBox(d, 15, 85, unitBuf, "SURAH", 4, qrField == 0);
+  qwDrawValueBox(d, 105, 85, verseBuf, "VERSE", 4, qrField == 1);
+
+  // Name of the selected surah (Arabic) under the boxes.
+  if (qrUnit == QReader::UNIT_KURSI) {
+    d.setTextColor(qwInk());
+    qwSetText(d, 1);
+    const char *t = "AYAT AL-KURSI";
+    d.setCursor(100 - qwTextInkWidth((uint8_t)strlen(t), 1) / 2, 140);
+    d.print(t);
+  } else {
+    drawSurahName(d, QReader::unitSurah(qrUnit), 100, 134);
+  }
+
+  d.setTextColor(qwInk());
+  qwSetText(d, 1);
+  d.setCursor(6, 186);
+  d.print("UP/DOWN=change  MENU=next  BACK=exit");
+}
+
+inline void qwDrawGamesMenu(Adafruit_GFX &d) {
+  d.fillScreen(qwPaper());
+  qwDrawTitle(d, "GAMES");
+  int16_t y = 38;
+  for (int i = 0; i < QW_GAME_COUNT; i++) {
+    bool selected = (i == qwGameMenuIndex);
+    if (selected) {
+      d.fillRect(4, y - 3, 192, 20, qwInk());
+      d.setTextColor(qwPaper());
+    } else {
+      d.setTextColor(qwInk());
+    }
+    qwSetText(d, 2);
+    d.setCursor(10, y);
+    d.print(QW_GAMES[i].name);
+    y += 22;
+  }
+  d.setTextColor(qwInk());
+  qwSetText(d, 1);
+  d.setCursor(6, 190);
+  d.print("UP/DOWN=select  MENU=play  BACK=exit");
+}
+
 // ---------------------------------------------------------------
 // Button handling
 // ---------------------------------------------------------------
@@ -508,6 +654,32 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
           qwVerseSubfield = 0;
           qwScreen = SCREEN_VERSE_EDIT;
           break;
+        case MENU_READER:
+          qwReaderLoadPosition();
+          qrField = 0;
+          qwScreen = SCREEN_QURAN_PICK;
+          break;
+      }
+    } else if (qwScreen == SCREEN_GAMES_MENU) {
+      if (QW_GAME_COUNT > 0) {
+        qwGameIndex = qwGameMenuIndex;
+        QW_GAMES[qwGameIndex].start();
+        qwGameLeaveAsk = false;
+        qwScreen = SCREEN_GAME_PLAY;
+      }
+    } else if (qwScreen == SCREEN_GAME_PLAY) {
+      if (qwGameLeaveAsk) qwGameLeaveAsk = false;  // MENU = stay
+      else QW_GAMES[qwGameIndex].select();
+    } else if (qwScreen == SCREEN_SPIRAL) {
+      if (longPress) {
+        if (qwSpiralResetAsk) {  // second long press: restart from 1
+          result.spiralReset = true;
+          qwSpiralResetAsk = false;
+        } else {
+          qwSpiralResetAsk = true;
+        }
+      } else {
+        qwSpiralResetAsk = false;
       }
     } else if (qwScreen == SCREEN_SETTINGS) {
       qwSettingsField = (qwSettingsField + 1) % FIELD_COUNT;
@@ -517,6 +689,18 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
       qwTempDate.subfield = (qwTempDate.subfield + 1) % 3;
     } else if (qwScreen == SCREEN_VERSE_EDIT) {
       qwVerseSubfield = (qwVerseSubfield + 1) % 2;
+    } else if (qwScreen == SCREEN_QURAN_PICK) {
+      if (qrField == 0) {
+        qrField = 1;
+      } else {  // surah and verse chosen: open the text
+        QReader::openAt(qrUnit, qrVerse, qrPage);
+        qwReaderSavePosition();
+        qwScreen = SCREEN_QURAN_READ;
+      }
+    } else if (qwScreen == SCREEN_QURAN_READ) {
+      qwReaderSavePosition();  // back to the picker to change surah/verse
+      qrField = 0;
+      qwScreen = SCREEN_QURAN_PICK;
     }
   } else if (wakeupBit & (UP_BTN_MASK | DOWN_BTN_MASK)) {
     bool isUp = (wakeupBit & UP_BTN_MASK) != 0;
@@ -535,6 +719,20 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
       if (m < 0) m = MENU_ITEM_COUNT - 1;
       if (m >= MENU_ITEM_COUNT) m = 0;
       qwMenuIndex = (uint8_t)m;
+    } else if (qwScreen == SCREEN_GAMES_MENU) {
+      if (QW_GAME_COUNT > 0) {
+        int m = (int)qwGameMenuIndex - dir;
+        if (m < 0) m = QW_GAME_COUNT - 1;
+        if (m >= QW_GAME_COUNT) m = 0;
+        qwGameMenuIndex = (uint8_t)m;
+      }
+    } else if (qwScreen == SCREEN_GAME_PLAY) {
+      qwGameHeldMs = heldMs;  // hold = faster cursor
+      if (qwGameLeaveAsk) qwGameLeaveAsk = false;  // any key = stay
+      else if (isUp) QW_GAMES[qwGameIndex].up();
+      else QW_GAMES[qwGameIndex].down();
+    } else if (qwScreen == SCREEN_SPIRAL) {
+      qwSpiralResetAsk = false;  // any other button cancels the question
     } else if (qwScreen == SCREEN_SETTINGS) {
       qwAdjustSettingsField(dir, heldMs);
     } else if (qwScreen == SCREEN_SET_TIME) {
@@ -543,11 +741,56 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
       qwAdjustDateField(dir, heldMs);
     } else if (qwScreen == SCREEN_VERSE_EDIT) {
       qwAdjustVerseField(dir, heldMs);
+    } else if (qwScreen == SCREEN_QURAN_PICK) {
+      qwAdjustReaderField(dir, heldMs);
+    } else if (qwScreen == SCREEN_QURAN_READ) {
+      // Like scrolling a document: DOWN = next page, UP = previous page.
+      QReader::step(qrUnit, qrVerse, qrPage, -dir);
+    } else if (qwScreen == SCREEN_WATCHFACE && isUp) {
+      // Top-right button on the watch face: the GAMES menu.
+      qwGameMenuIndex = 0;
+      qwScreen = SCREEN_GAMES_MENU;
+    } else if (qwScreen == SCREEN_WATCHFACE && !isUp && heldMs >= 1200) {
+      // Long press on the bottom-right button: straight to the last
+      // verse read in the QURAN READER.
+      qwReaderLoadPosition();
+      qwScreen = SCREEN_QURAN_READ;
     }
   } else if (wakeupBit & BACK_BTN_MASK) {
-    if (qwScreen == SCREEN_MAIN_MENU) {
+    if (qwScreen == SCREEN_WATCHFACE) {
+      // Long press (3 s) on BACK from the watch face: contemplation mode.
+      // (Only measured here, so BACK stays instant on every other screen.)
+      unsigned long start = millis();
+      while (digitalRead(BACK_BTN_PIN) == HIGH && (millis() - start) < 3000) {
+        delay(20);
+      }
+      if ((millis() - start) >= 3000) {
+        qwSpiralResetAsk = false;
+        qwScreen = SCREEN_SPIRAL;
+      }
+    } else if (qwScreen == SCREEN_MAIN_MENU) {
       qwScreen = SCREEN_WATCHFACE;
+    } else if (qwScreen == SCREEN_GAMES_MENU) {
+      qwScreen = SCREEN_WATCHFACE;
+    } else if (qwScreen == SCREEN_SPIRAL) {
+      if (qwSpiralResetAsk) qwSpiralResetAsk = false;  // BACK = cancel
+      else qwScreen = SCREEN_WATCHFACE;
+    } else if (qwScreen == SCREEN_GAME_PLAY) {
+      // A game in progress: the first BACK only asks, the second leaves.
+      bool busy = QW_GAMES[qwGameIndex].busy && QW_GAMES[qwGameIndex].busy();
+      if (busy && !qwGameLeaveAsk) {
+        qwGameLeaveAsk = true;
+      } else {
+        qwGameLeaveAsk = false;
+        qwScreen = SCREEN_GAMES_MENU;
+      }
     } else if (qwScreen == SCREEN_SETTINGS) {
+      AppSettings oldSt;
+      QWStorage::loadSettings(oldSt);
+      if (oldSt.driftTenths != qwTempSettings.driftTenths) {
+        result.commitDrift = true;  // main.cpp re-anchors the correction
+        result.oldDriftTenths = oldSt.driftTenths;
+      }
       QWStorage::saveSettings(qwTempSettings);
       qwScreen = SCREEN_WATCHFACE;
     } else if (qwScreen == SCREEN_SET_TIME) {
@@ -562,7 +805,16 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
       result.day = qwTempDate.day;
       qwScreen = SCREEN_WATCHFACE;
     } else if (qwScreen == SCREEN_VERSE_EDIT) {
+      QuranBookmark oldBm;
+      QWStorage::loadBookmark(oldBm);
+      if (oldBm.surah != qwTempBookmark.surah ||
+          oldBm.verse != qwTempBookmark.verse) {
+        result.commitBookmark = true; // main.cpp stamps the time
+      }
       QWStorage::saveBookmark(qwTempBookmark);
+      qwScreen = SCREEN_WATCHFACE;
+    } else if (qwScreen == SCREEN_QURAN_PICK || qwScreen == SCREEN_QURAN_READ) {
+      qwReaderSavePosition();
       qwScreen = SCREEN_WATCHFACE;
     }
   }

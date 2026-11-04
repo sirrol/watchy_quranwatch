@@ -109,10 +109,12 @@ struct AppSettings {
   uint8_t asrMethod;        // see AsrMethod
   bool prayerVibrate;       // vibrate at Fajr, Dhuhr, Asr, Maghrib, Isha
   bool invertDisplay;       // software color inversion (whole screen)
+  bool prayerAlertVibrate;  // one pulse when the "<45min" prayer alert appears
+  int16_t driftTenths;      // clock drift correction, 0.1 s/day (+ = watch is slow)
 };
 
 // Defaults: Paris, no DST, no Hijri correction, MWL method, standard Asr,
-// prayer vibration on, normal (non-inverted) colors.
+// prayer vibration on, normal (non-inverted) colors, prayer alert vibration on.
 static const AppSettings DEFAULT_APP_SETTINGS = {
     48.8566f, // latitude
     2.3522f,  // longitude
@@ -122,7 +124,9 @@ static const AppSettings DEFAULT_APP_SETTINGS = {
     METHOD_MWL,
     ASR_STANDARD,
     true,
-    false};
+    false,
+    true,
+    0};  // drift correction: none
 
 // ---------------------------------------------------------------
 // 4) Quran bookmark (marque-page).
