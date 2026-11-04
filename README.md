@@ -2,7 +2,7 @@
 
 
 <p align="center">
-  <img src="images/01.jpg" alt="pic.V2" width="300">
+  <img src="images/01.jpg" alt="pic.V3" width="300">
 </p>
 
 
@@ -30,6 +30,10 @@ Licensed under the **GNU General Public License v3.0** (see [License](#license))
 
 ### Watch face (9 zones)
 
+<p align="center">
+  <img src="images/02.jpg" alt="pic.V3" width="300">
+</p>
+
 | Zone | Content |
 |---|---|
 | Moon | Moon phase computed mathematically (Meeus algorithm, no phase bitmaps), photo-derived surface texture on the lit side, illumination in % |
@@ -54,7 +58,7 @@ a "D-1" warning) are announced under the quarter-hour dots.
 ### Quran reader
 
 <p align="center">
-  <img src="images/02.jpg" alt="pic.V2" width="300">
+  <img src="images/05.jpg" alt="pic.V3" width="300">
 </p>
 
 Juz Amma (surahs 78 to 114) and Ayat al-Kursi, displayed in Arabic like a
@@ -66,7 +70,7 @@ watch face after 10 minutes without a button press.
 ### Games
 
 <p align="center">
-  <img src="images/03.jpg" alt="pic.V2" width="300">
+  <img src="images/03.jpg" alt="pic.V3" width="300">
 </p>
 
 Open the game menu with the **top-right button (UP)** from the watch face.
@@ -100,6 +104,11 @@ from 1.
 
 ### Time handling
 
+<p align="center">
+  <img src="images/06.jpg" alt="pic.V3" width="300">
+</p>
+
+
 * The RTC chip is **never written** (some Watchy V2 clones misbehave on RTC
   writes). Displayed time = RTC + a stored offset + DST shift + drift correction.
 * **DST** toggle shifts the clock and the prayer times (TIME ZONE is the
@@ -132,6 +141,11 @@ bottom-right.
 | UP | games menu | up / increase (hold = accelerate) |
 | DOWN short | - | down / decrease |
 | DOWN long (1.2 s) | Quran reader at the last verse read | - |
+
+<p align="center">
+  <img src="images/07.jpg" alt="pic.V3" width="300">
+</p>
+
 
 Main menu: SETTINGS, SET TIME, SET DATE, BOOKMARK, READER.
 Settings: latitude, longitude, UTC offset, DST, prayer method, Asr method,
