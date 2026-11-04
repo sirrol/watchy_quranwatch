@@ -38,6 +38,10 @@ inline void loadSettings(AppSettings &settings) {
       prefs.getBool("prVib", DEFAULT_APP_SETTINGS.prayerVibrate);
   settings.invertDisplay =
       prefs.getBool("invert", DEFAULT_APP_SETTINGS.invertDisplay);
+  settings.prayerAlertVibrate =
+      prefs.getBool("alertVib", DEFAULT_APP_SETTINGS.prayerAlertVibrate);
+  settings.driftTenths =
+      (int16_t)prefs.getShort("drift", DEFAULT_APP_SETTINGS.driftTenths);
   prefs.end();
 }
 
@@ -53,6 +57,8 @@ inline void saveSettings(const AppSettings &settings) {
   prefs.putUChar("asrMethod", settings.asrMethod);
   prefs.putBool("prVib", settings.prayerVibrate);
   prefs.putBool("invert", settings.invertDisplay);
+  prefs.putBool("alertVib", settings.prayerAlertVibrate);
+  prefs.putShort("drift", settings.driftTenths);
   prefs.end();
 }
 
@@ -90,6 +96,23 @@ inline void saveTimeOffset(int32_t offsetSeconds) {
   prefs.end();
 }
 
+// RTC time (seconds since 1970, raw RTC reading) from which the clock
+// drift correction is accumulated. 0 = no reference yet (no correction).
+inline uint32_t loadDriftRef() {
+  Preferences prefs;
+  prefs.begin(NS, true);
+  uint32_t v = prefs.getUInt("dRef", 0);
+  prefs.end();
+  return v;
+}
+
+inline void saveDriftRef(uint32_t rtcSeconds) {
+  Preferences prefs;
+  prefs.begin(NS, false);
+  prefs.putUInt("dRef", rtcSeconds);
+  prefs.end();
+}
+
 // Moment (UTC, seconds since 1970) of the last bookmark change, i.e.
 // the last Quran reading. 0 = never recorded. Drives the 5 stars.
 inline uint32_t loadLastReadTime() {
@@ -104,6 +127,42 @@ inline void saveLastReadTime(uint32_t utcSeconds) {
   Preferences prefs;
   prefs.begin(NS, false);
   prefs.putUInt("lastRead", utcSeconds);
+  prefs.end();
+}
+
+// Last position of the QURAN READER (unit 0..37 = surahs 78..114 then
+// Ayat al-Kursi, and verse number inside the unit). Used for the
+// long-press shortcut on the watch face.
+inline void loadReaderPosition(uint8_t &unit, uint16_t &verse) {
+  Preferences prefs;
+  prefs.begin(NS, true);
+  unit = prefs.getUChar("rdUnit", 0);
+  verse = prefs.getUShort("rdVerse", 1);
+  prefs.end();
+}
+
+inline void saveReaderPosition(uint8_t unit, uint16_t verse) {
+  Preferences prefs;
+  prefs.begin(NS, false);
+  prefs.putUChar("rdUnit", unit);
+  prefs.putUShort("rdVerse", verse);
+  prefs.end();
+}
+
+// Start of the contemplation spiral: RTC minute (since 1970) at which
+// the number line was at 1. 0 = not started yet.
+inline uint32_t loadSpiralStart() {
+  Preferences prefs;
+  prefs.begin(NS, true);
+  uint32_t v = prefs.getUInt("spStart", 0);
+  prefs.end();
+  return v;
+}
+
+inline void saveSpiralStart(uint32_t minutes) {
+  Preferences prefs;
+  prefs.begin(NS, false);
+  prefs.putUInt("spStart", minutes);
   prefs.end();
 }
 
