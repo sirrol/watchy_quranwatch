@@ -41,7 +41,7 @@ Licensed under the **GNU General Public License v3.0** (see [License](#license))
 | Bookmark | Surah and verse you reached (`S###:###`), surah name in Arabic, 5 "reading stars" (one is lost every 24 h after the last bookmark change) |
 | Hijri grid | The 12 Hijri months as a grid, the current month circled |
 | Hour | Large 7-segment hour digits inside a square frame that fills quarter by quarter; special-day messages and "&lt;45min / &lt;30min / &lt;15min / Now" prayer alert under the dots |
-| Progress bars | Three vertical bars with a Penrose-tiling texture: surahs read, progress in the current surah, and total Quran progress by pages (n/604) |
+| Progress bar | a vertical bar with a Penrose-tiling texture: total Quran progress by pages (n/604) |
 | Prayers | Fajr, Shuruq, Dhuhr, Asr, Maghrib, Isha; the current prayer is boxed |
 
 Special days (Ashura, Arafah, Eid al-Adha, the last 10 nights of Ramadan, with
