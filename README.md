@@ -1,7 +1,9 @@
 # QuranWatch
 
 
+<p align="center">
   <img src="images/01.jpg" alt="pic.V3" width="300">
+</p>
 
 
 A custom watch face and a set of mini-apps for the **Watchy V2** e-paper
@@ -28,7 +30,7 @@ Licensed under the **GNU General Public License v3.0** (see [License](#license))
 
 ## Features
 
-p align="center">
+<p align="center">
   <img src="images/02.jpg" alt="pic.V3" width="300">
 </p>
 
@@ -60,11 +62,11 @@ BACK, and several are saved in flash so they survive deep sleep):
 
 ### Prayer times
 
-p align="center">
+<p align="center">
   <img src="images/03.jpg" alt="pic.V3" width="300">
 </p>
 
-p align="center">
+<p align="center">
   <img src="images/04.jpg" alt="pic.V3" width="300">
 </p>
 
@@ -76,7 +78,7 @@ p align="center">
 
 ### Quran reader
 
-p align="center">
+<p align="center">
   <img src="images/06.jpg" alt="pic.V3" width="300">
 </p>
 
@@ -88,7 +90,7 @@ watch face after 10 minutes without a button press.
 
 ### APPS menu
 
-p align="center">
+<p align="center">
   <img src="images/07.jpg" alt="pic.V3" width="300">
 </p>
 
@@ -110,11 +112,11 @@ confirmation.
 
 ### Games and learning games (APPS > GAMES)
 
-p align="center">
+<p align="center">
   <img src="images/08.jpg" alt="pic.V3" width="300">
 </p>
 
-p align="center">
+<p align="center">
   <img src="images/09.jpg" alt="pic.V3" width="300">
 </p>
 
@@ -143,7 +145,7 @@ progress.
 
 ### Tasbih
 
-p align="center">
+<p align="center">
   <img src="images/10.jpg" alt="pic.V3" width="300">
 </p>
 
@@ -165,7 +167,7 @@ press on MENU asks to restart from 1.
 
 ### Dhikr bloom
 
-p align="center">
+<p align="center">
   <img src="images/11.jpg" alt="pic.V3" width="300">
 </p>
 
