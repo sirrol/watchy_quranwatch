@@ -1,5 +1,9 @@
 # QuranWatch
 
+p align="center">
+  <img src="images/01.jpg" alt="pic.V3" width="300">
+</p>
+
 A custom watch face and a set of mini-apps for the **Watchy V2** e-paper
 smartwatch (ESP32, 200 x 200 monochrome screen), built with PlatformIO.
 
@@ -23,6 +27,10 @@ Licensed under the **GNU General Public License v3.0** (see [License](#license))
 ---
 
 ## Features
+
+p align="center">
+  <img src="images/02.jpg" alt="pic.V3" width="300">
+</p>
 
 ### Watch face
 
@@ -52,6 +60,14 @@ BACK, and several are saved in flash so they survive deep sleep):
 
 ### Prayer times
 
+p align="center">
+  <img src="images/03.jpg" alt="pic.V3" width="300">
+</p>
+
+p align="center">
+  <img src="images/04.jpg" alt="pic.V3" width="300">
+</p>
+
 * Methods: MWL, ISNA, Egyptian, Karachi, Umm al-Qura, Tehran, JAKIM,
   Moonsighting Committee (fixed-angle approximation), UOIF.
 * Asr: Standard or Hanafi.
@@ -60,6 +76,10 @@ BACK, and several are saved in flash so they survive deep sleep):
 
 ### Quran reader
 
+p align="center">
+  <img src="images/06.jpg" alt="pic.V3" width="300">
+</p>
+
 Juz Amma (surahs 78 to 114) and Ayat al-Kursi, displayed in Arabic like a
 mushaf page: continuous verses, justified lines, a Basmala line, a ring with the
 verse number at the end of each verse. The text is stored as one-bit word
@@ -67,6 +87,10 @@ images, so no font or text shaping is needed on the watch. It returns to the
 watch face after 10 minutes without a button press.
 
 ### APPS menu
+
+p align="center">
+  <img src="images/07.jpg" alt="pic.V3" width="300">
+</p>
 
 Press **UP** (top-right) on the watch face. The menu lists the apps, then a
 **GAMES** line that opens the games.
@@ -85,6 +109,14 @@ phone. BACK inside an app goes up one level; leaving an app asks for
 confirmation.
 
 ### Games and learning games (APPS > GAMES)
+
+p align="center">
+  <img src="images/08.jpg" alt="pic.V3" width="300">
+</p>
+
+p align="center">
+  <img src="images/09.jpg" alt="pic.V3" width="300">
+</p>
 
 | Game | Players |
 |---|---|
@@ -111,6 +143,10 @@ progress.
 
 ### Tasbih
 
+p align="center">
+  <img src="images/10.jpg" alt="pic.V3" width="300">
+</p>
+
 Long press **UP** on the watch face. Beads on a regular polygon (1 bead, 2
 beads, a triangle... toward a circle), a large count in the centre and a calm
 animation. Goal: FREE, 33, 99 or 100. MENU adds 1, DOWN removes 1, the count is
@@ -128,6 +164,10 @@ while the mode is closed. The header shows the last prime. In the mode, a long
 press on MENU asks to restart from 1.
 
 ### Dhikr bloom
+
+p align="center">
+  <img src="images/11.jpg" alt="pic.V3" width="300">
+</p>
 
 Short press **DOWN** on the watch face. When it opens, the flowers are closed
 buds that turn once around the heart in steps of 45 degrees (the heart beats),
