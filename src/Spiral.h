@@ -71,6 +71,7 @@ inline int drawSpiral(Adafruit_GFX &d, uint32_t N) {
   static const int8_t DY[4] = {0, 1, 0, -1};
   int x = 0, y = 0, dir = 0, seg = 1, left = 1;
   int primes = 0;
+  uint32_t lastPrime = 0;  // largest prime shown so far
   int tipX = cx, tipY = cy;
   for (uint32_t n = 2; n <= N; n++) {
     x += DX[dir];
@@ -83,6 +84,7 @@ inline int drawSpiral(Adafruit_GFX &d, uint32_t N) {
     int px = cx + x * cell, py = cy - y * cell;
     if (!isComposite(n)) {
       primes++;
+      lastPrime = n;
       if (cell == 2) d.fillRect(px, py, 2, 2, ink);
       else d.drawPixel(px, py, ink);
     }
@@ -94,9 +96,10 @@ inline int drawSpiral(Adafruit_GFX &d, uint32_t N) {
   else d.drawRect(tipX - 3, tipY - 3, 7, 7, ink);
 
   // header
-  char h[40];
-  if (N >= MAX_N) snprintf(h, sizeof(h), "COMPLETE  N=%lu  P=%d", (unsigned long)N, primes);
-  else snprintf(h, sizeof(h), "N=%lu   PRIMES=%d", (unsigned long)N, primes);
+  char h[48];
+  if (N >= MAX_N) snprintf(h, sizeof(h), "DONE N=%lu P=%d LAST=%lu", (unsigned long)N, primes, (unsigned long)lastPrime);
+  else if (lastPrime) snprintf(h, sizeof(h), "N=%lu P=%d LAST=%lu", (unsigned long)N, primes, (unsigned long)lastPrime);
+  else snprintf(h, sizeof(h), "N=%lu P=%d LAST=-", (unsigned long)N, primes);
   d.setTextColor(ink);
   qwSetText(d, 1);
   d.setCursor(100 - qwTextInkWidth((uint8_t)strlen(h), 1) / 2, 3);

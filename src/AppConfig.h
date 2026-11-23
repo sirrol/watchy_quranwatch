@@ -111,6 +111,9 @@ struct AppSettings {
   bool invertDisplay;       // software color inversion (whole screen)
   bool prayerAlertVibrate;  // one pulse when the "<45min" prayer alert appears
   int16_t driftTenths;      // clock drift correction, 0.1 s/day (+ = watch is slow)
+  bool zakatOn;             // zakat reminder enabled
+  uint8_t zakatMonth;       // Hijri month (1..12) whose 1st day, at Dhuhr, shows the reminder
+  bool whiteOn;             // White Days (13-14-15) reminder the day before
 };
 
 // Defaults: Paris, no DST, no Hijri correction, MWL method, standard Asr,
@@ -126,7 +129,10 @@ static const AppSettings DEFAULT_APP_SETTINGS = {
     true,
     false,
     true,
-    0};  // drift correction: none
+    0,        // drift correction: none
+    false,    // zakat reminder off
+    9,        // ... on 1 Ramadan when switched on
+    false};   // White Days reminder off
 
 // ---------------------------------------------------------------
 // 4) Quran bookmark (marque-page).

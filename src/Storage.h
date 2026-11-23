@@ -42,6 +42,10 @@ inline void loadSettings(AppSettings &settings) {
       prefs.getBool("alertVib", DEFAULT_APP_SETTINGS.prayerAlertVibrate);
   settings.driftTenths =
       (int16_t)prefs.getShort("drift", DEFAULT_APP_SETTINGS.driftTenths);
+  settings.zakatOn = prefs.getBool("zkOn", DEFAULT_APP_SETTINGS.zakatOn);
+  settings.zakatMonth = prefs.getUChar("zkMon", DEFAULT_APP_SETTINGS.zakatMonth);
+  if (settings.zakatMonth < 1 || settings.zakatMonth > 12) settings.zakatMonth = DEFAULT_APP_SETTINGS.zakatMonth;
+  settings.whiteOn = prefs.getBool("wdOn", DEFAULT_APP_SETTINGS.whiteOn);
   prefs.end();
 }
 
@@ -59,6 +63,9 @@ inline void saveSettings(const AppSettings &settings) {
   prefs.putBool("invert", settings.invertDisplay);
   prefs.putBool("alertVib", settings.prayerAlertVibrate);
   prefs.putShort("drift", settings.driftTenths);
+  prefs.putBool("zkOn", settings.zakatOn);
+  prefs.putUChar("zkMon", settings.zakatMonth);
+  prefs.putBool("wdOn", settings.whiteOn);
   prefs.end();
 }
 
@@ -163,6 +170,29 @@ inline void saveSpiralStart(uint32_t minutes) {
   Preferences prefs;
   prefs.begin(NS, false);
   prefs.putUInt("spStart", minutes);
+  prefs.end();
+}
+
+// Small binary records (used by the dhikr garden, Garden.h).
+inline bool loadBlob(const char *key, void *buf, size_t len) {
+  Preferences prefs;
+  prefs.begin(NS, true);
+  bool ok = prefs.getBytesLength(key) == len && prefs.getBytes(key, buf, len) == len;
+  prefs.end();
+  return ok;
+}
+
+inline void saveBlob(const char *key, const void *buf, size_t len) {
+  Preferences prefs;
+  prefs.begin(NS, false);
+  prefs.putBytes(key, buf, len);
+  prefs.end();
+}
+
+inline void removeKey(const char *key) {
+  Preferences prefs;
+  prefs.begin(NS, false);
+  prefs.remove(key);
   prefs.end();
 }
 

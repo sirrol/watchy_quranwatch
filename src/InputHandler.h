@@ -19,6 +19,8 @@
                          (accelerates the longer you hold - see
                          qwAccelStep)
     DOWN  press/hold  : move selection down / decrease value
+    DOWN  short press, from watch face only:
+                       -> dhikr garden (see Garden.h)
     BACK  long press (3s), from watch face only:
                        -> contemplation mode (Ulam spiral, see Spiral.h)
     BACK  short press : save & return to the watch face from any
@@ -29,14 +31,18 @@
 #include <Arduino.h>
 #include <Watchy.h>
 #include <Adafruit_GFX.h>
+#include "NotoMono13.h"
+#include "NotoMono17.h"
 #include "UiCommon.h"
 #include "AppConfig.h"
 #include "QuranData.h"
 #include "Storage.h"
 #include "SurahNames.h"
 #include "QuranReader.h"
-#include "Games.h"
+#include "Apps.h"
 #include "Spiral.h"
+#include "Garden.h"
+#include "Tasbih.h"
 
 #ifndef GxEPD_BLACK
 #define GxEPD_BLACK 0
@@ -99,7 +105,9 @@ enum AppScreen : uint8_t {
   SCREEN_QURAN_READ,  // QURAN READER: the text itself
   SCREEN_GAMES_MENU,  // GAMES: list (top-right button from the watch face)
   SCREEN_GAME_PLAY,   // GAMES: a game is running
-  SCREEN_SPIRAL       // contemplation: Ulam spiral of the primes (long press BACK)
+  SCREEN_SPIRAL,      // contemplation: Ulam spiral of the primes (long press BACK)
+  SCREEN_GARDEN,      // dhikr garden (short press DOWN on the watch face)
+  SCREEN_TASBIH       // geometric tasbih (long press UP on the watch face)
 };
 
 enum MainMenuItem : uint8_t {
@@ -123,6 +131,9 @@ enum SettingsField : uint8_t {
   FIELD_ALERT_VIBRATE,
   FIELD_INVERT_DISPLAY,
   FIELD_CLOCK_DRIFT,
+  FIELD_ZAKAT_ON,
+  FIELD_ZAKAT_MONTH,
+  FIELD_WHITE_DAYS,
   FIELD_COUNT
 };
 
@@ -159,7 +170,8 @@ RTC_DATA_ATTR uint8_t qwVerseSubfield = 0;
 RTC_DATA_ATTR uint8_t qrUnit = 0;     // QURAN READER: 0..36 = surah 78..114, 37 = Ayat al-Kursi
 RTC_DATA_ATTR uint16_t qrVerse = 1;   // verse inside the unit
 RTC_DATA_ATTR uint8_t qrPage = 0;     // page inside the surah (pages are cut from its start)
-RTC_DATA_ATTR uint8_t qwGameMenuIndex = 0;  // GAMES menu selection
+RTC_DATA_ATTR uint8_t qwGameMenuIndex = 0;  // APPS menu selection (in the current level)
+RTC_DATA_ATTR uint8_t qwGameMenuLevel = 0;  // 0 = APPS, 1 = APPS > GAMES
 RTC_DATA_ATTR uint8_t qwGameIndex = 0;      // game being played
 RTC_DATA_ATTR bool qwGameLeaveAsk = false;  // "LEAVE GAME?" box is showing
 RTC_DATA_ATTR bool qwSpiralResetAsk = false;  // "RESTART?" box of the spiral is showing
@@ -257,6 +269,19 @@ inline void qwAdjustSettingsField(int8_t dir, unsigned long heldMs) {
       qwTempSettings.driftTenths = (int16_t)v;
       break;
     }
+    case FIELD_ZAKAT_ON:
+      qwTempSettings.zakatOn = !qwTempSettings.zakatOn;
+      break;
+    case FIELD_ZAKAT_MONTH: {  // Hijri month 1..12, wraps around
+      int mth = (int)qwTempSettings.zakatMonth - 1 + dir;
+      if (mth < 0) mth = 11;
+      if (mth > 11) mth = 0;
+      qwTempSettings.zakatMonth = (uint8_t)(mth + 1);
+      break;
+    }
+    case FIELD_WHITE_DAYS:
+      qwTempSettings.whiteOn = !qwTempSettings.whiteOn;
+      break;
   }
 }
 
@@ -399,6 +424,20 @@ inline void qwFieldValueString(char *out, size_t outLen, uint8_t field,
                abs(v) / 10, abs(v) % 10);
       break;
     }
+    case FIELD_ZAKAT_ON:
+      snprintf(out, outLen, "%s", s.zakatOn ? "ON" : "OFF");
+      break;
+    case FIELD_ZAKAT_MONTH: {
+      static const char *const NAMES[12] = {"MUHARRAM", "SAFAR",    "RABI I",    "RABI II",
+                                            "JUMADA I", "JUMADA II", "RAJAB",    "SHABAN",
+                                            "RAMADAN",  "SHAWWAL",  "DHU QADAH", "DHU HIJJAH"};
+      int mth = (s.zakatMonth >= 1 && s.zakatMonth <= 12) ? s.zakatMonth - 1 : 8;
+      snprintf(out, outLen, "%s", NAMES[mth]);
+      break;
+    }
+    case FIELD_WHITE_DAYS:
+      snprintf(out, outLen, "%s", s.whiteOn ? "ON" : "OFF");
+      break;
   }
 }
 
@@ -406,7 +445,8 @@ inline const char *qwFieldLabel(uint8_t field) {
   static const char *labels[FIELD_COUNT] = {
       "LATITUDE",      "LONGITUDE",  "STD TIME ZONE", "DST (+1H)",
       "PRAYER METHOD", "ASR METHOD", "HIJRI ADJUST", "PRAYER VIBRATE",
-      "45MIN ALERT VIB", "INVERT DISPLAY", "CLOCK DRIFT"};
+      "45MIN ALERT VIB", "INVERT DISPLAY", "CLOCK DRIFT",
+      "ZAKAT REMINDER", "ZAKAT MONTH", "WHITE DAYS"};
   return labels[field];
 }
 
@@ -449,28 +489,38 @@ inline void qwDrawSettingsScreen(Adafruit_GFX &d) {
   d.fillScreen(qwPaper());
   qwDrawTitle(d, "SETTINGS");
 
-  int16_t y0 = 29, spacing = 13;
-  for (int i = 0; i < FIELD_COUNT; i++) {
-    int16_t y = y0 + i * spacing;
+  // Noto Sans Mono 13 px, 7 fields per page: the page follows the selection.
+  constexpr int PER_PAGE = 7;
+  const int pages = (FIELD_COUNT + PER_PAGE - 1) / PER_PAGE;
+  const int page = qwSettingsField / PER_PAGE;
+  int16_t y = 30;  // top of the first row
+  for (int r = 0; r < PER_PAGE; r++) {
+    int i = page * PER_PAGE + r;
+    if (i >= FIELD_COUNT) break;
     bool selected = (i == qwSettingsField);
     if (selected) {
-      d.fillRect(2, y - 2, 196, 12, qwInk());
+      d.fillRect(2, y, 196, 18, qwInk());
       d.setTextColor(qwPaper());
     } else {
       d.setTextColor(qwInk());
     }
-    qwSetText(d, 1);
-    d.setCursor(6, y);
+    d.setFont(&NotoMono13);
+    d.setTextSize(1);
+    d.setCursor(6, y + 14);  // baseline
     d.print(qwFieldLabel(i));
 
     char val[16];
     qwFieldValueString(val, sizeof(val), i, qwTempSettings);
-    int16_t w = qwTextWidth((uint8_t)strlen(val), 1);
-    d.setCursor(194 - w, y);
+    d.setCursor(194 - 8 * (int16_t)strlen(val), y + 14);
     d.print(val);
+    y += 20;
   }
   d.setTextColor(qwInk());
   qwSetText(d, 1);
+  char pg[8];
+  snprintf(pg, sizeof(pg), "%d/%d", page + 1, pages);
+  d.setCursor(200 - 6 * (int16_t)strlen(pg) - 4, 8);
+  d.print(pg);
   d.setCursor(4, 172);
   d.print("UP/DOWN=edit");
   d.setCursor(4, 182);
@@ -581,27 +631,55 @@ inline void qwDrawReaderPickScreen(Adafruit_GFX &d) {
   d.print("UP/DOWN=change  MENU=next  BACK=exit");
 }
 
+// APPS menu: level 0 lists the apps and a last "GAMES" line, level 1 the games.
+inline int qwGameMenuCount() {
+  return qwGameMenuLevel ? (int)QW_GAME_COUNT - QW_APP_COUNT : QW_APP_COUNT + 1;
+}
+inline const char *qwGameMenuName(int i) {
+  if (qwGameMenuLevel) return QW_GAMES[QW_APP_COUNT + i].name;
+  return i < QW_APP_COUNT ? QW_GAMES[i].name : "GAMES  >";
+}
+// back in the menu after leaving an app or a game
+inline void qwGameMenuReturn() {
+  if (qwGameIndex >= QW_APP_COUNT) { qwGameMenuLevel = 1; qwGameMenuIndex = qwGameIndex - QW_APP_COUNT; }
+  else { qwGameMenuLevel = 0; qwGameMenuIndex = qwGameIndex; }
+}
+
 inline void qwDrawGamesMenu(Adafruit_GFX &d) {
   d.fillScreen(qwPaper());
-  qwDrawTitle(d, "GAMES");
-  int16_t y = 38;
-  for (int i = 0; i < QW_GAME_COUNT; i++) {
+  qwDrawTitle(d, qwGameMenuLevel ? "GAMES" : "APPS");
+  const int count = qwGameMenuCount();
+  // Noto Sans Mono 17 px (caps 12 px high, 10 px per character), 7 lines per
+  // page (13 games fit on 2 pages): the page follows the selected line.
+  constexpr int PER_PAGE = 7;
+  const int pages = (count + PER_PAGE - 1) / PER_PAGE;
+  const int page = qwGameMenuIndex / PER_PAGE;
+  const int16_t pitch = 21;
+  int16_t y = 31;  // top of the first row
+  for (int r = 0; r < PER_PAGE; r++) {
+    int i = page * PER_PAGE + r;
+    if (i >= count) break;
     bool selected = (i == qwGameMenuIndex);
     if (selected) {
-      d.fillRect(4, y - 3, 192, 20, qwInk());
+      d.fillRect(4, y, 192, pitch - 3, qwInk());   // 18 px: capitals (12 px) get 3 px above and below
       d.setTextColor(qwPaper());
     } else {
       d.setTextColor(qwInk());
     }
-    qwSetText(d, 2);
-    d.setCursor(10, y);
-    d.print(QW_GAMES[i].name);
-    y += 22;
+    d.setFont(&NotoMono17);
+    d.setTextSize(1);
+    d.setCursor(10, y + 15);  // baseline
+    d.print(qwGameMenuName(i));
+    y += pitch;
   }
   d.setTextColor(qwInk());
   qwSetText(d, 1);
-  d.setCursor(6, 190);
-  d.print("UP/DOWN=select  MENU=play  BACK=exit");
+  char b[8];
+  snprintf(b, sizeof(b), "%d/%d", page + 1, pages);
+  d.setCursor(6, 188);
+  d.print(b);
+  d.setCursor(36, 188);
+  d.print("UP/DOWN=select MENU=open");
 }
 
 // ---------------------------------------------------------------
@@ -661,8 +739,11 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
           break;
       }
     } else if (qwScreen == SCREEN_GAMES_MENU) {
-      if (QW_GAME_COUNT > 0) {
-        qwGameIndex = qwGameMenuIndex;
+      if (!qwGameMenuLevel && qwGameMenuIndex == QW_APP_COUNT) {  // the GAMES line opens the games
+        qwGameMenuLevel = 1;
+        qwGameMenuIndex = 0;
+      } else if (QW_GAME_COUNT > 0) {
+        qwGameIndex = qwGameMenuLevel ? QW_APP_COUNT + qwGameMenuIndex : qwGameMenuIndex;
         QW_GAMES[qwGameIndex].start();
         qwGameLeaveAsk = false;
         qwScreen = SCREEN_GAME_PLAY;
@@ -681,6 +762,12 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
       } else {
         qwSpiralResetAsk = false;
       }
+    } else if (qwScreen == SCREEN_GARDEN) {
+      Gd::select();  // an entry is applied by main.cpp (needs the RTC)
+    } else if (qwScreen == SCREEN_TASBIH) {
+      uint8_t r = Tb::select();
+      if (r == Tb::TO_GARDEN) qwScreen = SCREEN_GARDEN;  // the entry is applied by main.cpp
+      else if (r == Tb::TO_FACE) qwScreen = SCREEN_WATCHFACE;
     } else if (qwScreen == SCREEN_SETTINGS) {
       qwSettingsField = (qwSettingsField + 1) % FIELD_COUNT;
     } else if (qwScreen == SCREEN_SET_TIME) {
@@ -720,10 +807,13 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
       if (m >= MENU_ITEM_COUNT) m = 0;
       qwMenuIndex = (uint8_t)m;
     } else if (qwScreen == SCREEN_GAMES_MENU) {
-      if (QW_GAME_COUNT > 0) {
-        int m = (int)qwGameMenuIndex - dir;
-        if (m < 0) m = QW_GAME_COUNT - 1;
-        if (m >= QW_GAME_COUNT) m = 0;
+      {
+        // Hold = bigger jumps: a tap moves 1 line, a short hold 3, a long
+        // hold 6 (one page). The list wraps around.
+        int cnt = qwGameMenuCount();
+        int step = qwAccelStep(heldMs, 1, 3, 6);
+        int m = ((int)qwGameMenuIndex - dir * step) % cnt;
+        if (m < 0) m += cnt;
         qwGameMenuIndex = (uint8_t)m;
       }
     } else if (qwScreen == SCREEN_GAME_PLAY) {
@@ -733,6 +823,10 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
       else QW_GAMES[qwGameIndex].down();
     } else if (qwScreen == SCREEN_SPIRAL) {
       qwSpiralResetAsk = false;  // any other button cancels the question
+    } else if (qwScreen == SCREEN_GARDEN) {
+      Gd::button(dir, heldMs);
+    } else if (qwScreen == SCREEN_TASBIH) {
+      Tb::button(dir);
     } else if (qwScreen == SCREEN_SETTINGS) {
       qwAdjustSettingsField(dir, heldMs);
     } else if (qwScreen == SCREEN_SET_TIME) {
@@ -746,15 +840,24 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
     } else if (qwScreen == SCREEN_QURAN_READ) {
       // Like scrolling a document: DOWN = next page, UP = previous page.
       QReader::step(qrUnit, qrVerse, qrPage, -dir);
+    } else if (qwScreen == SCREEN_WATCHFACE && isUp && heldMs >= 1200) {
+      // Long press on the top-right button: the TASBIH.
+      Tb::open();
+      qwScreen = SCREEN_TASBIH;
     } else if (qwScreen == SCREEN_WATCHFACE && isUp) {
       // Top-right button on the watch face: the GAMES menu.
       qwGameMenuIndex = 0;
+      qwGameMenuLevel = 0;
       qwScreen = SCREEN_GAMES_MENU;
     } else if (qwScreen == SCREEN_WATCHFACE && !isUp && heldMs >= 1200) {
       // Long press on the bottom-right button: straight to the last
       // verse read in the QURAN READER.
       qwReaderLoadPosition();
       qwScreen = SCREEN_QURAN_READ;
+    } else if (qwScreen == SCREEN_WATCHFACE && !isUp) {
+      // Short press on the bottom-right button: the DHIKR GARDEN.
+      Gd::open();
+      qwScreen = SCREEN_GARDEN;
     }
   } else if (wakeupBit & BACK_BTN_MASK) {
     if (qwScreen == SCREEN_WATCHFACE) {
@@ -767,21 +870,31 @@ inline QwCommit handleQuranWatchButtons(Watchy &watchy, int curHour,
       if ((millis() - start) >= 3000) {
         qwSpiralResetAsk = false;
         qwScreen = SCREEN_SPIRAL;
+      } else {
+        Gd::kamonDismissPending = 1;  // short press: hide the sakura crest (main.cpp)
       }
     } else if (qwScreen == SCREEN_MAIN_MENU) {
       qwScreen = SCREEN_WATCHFACE;
     } else if (qwScreen == SCREEN_GAMES_MENU) {
-      qwScreen = SCREEN_WATCHFACE;
+      if (qwGameMenuLevel) { qwGameMenuLevel = 0; qwGameMenuIndex = QW_APP_COUNT; }  // GAMES -> APPS
+      else qwScreen = SCREEN_WATCHFACE;
     } else if (qwScreen == SCREEN_SPIRAL) {
       if (qwSpiralResetAsk) qwSpiralResetAsk = false;  // BACK = cancel
       else qwScreen = SCREEN_WATCHFACE;
+    } else if (qwScreen == SCREEN_GARDEN) {
+      if (Gd::back()) qwScreen = SCREEN_WATCHFACE;
+    } else if (qwScreen == SCREEN_TASBIH) {
+      if (Tb::back() == Tb::TO_FACE) qwScreen = SCREEN_WATCHFACE;
     } else if (qwScreen == SCREEN_GAME_PLAY) {
       // A game in progress: the first BACK only asks, the second leaves.
       bool busy = QW_GAMES[qwGameIndex].busy && QW_GAMES[qwGameIndex].busy();
-      if (busy && !qwGameLeaveAsk) {
+      if (!qwGameLeaveAsk && QW_GAMES[qwGameIndex].back && QW_GAMES[qwGameIndex].back()) {
+        // BACK was used inside the app (up one sub-menu level)
+      } else if (busy && !qwGameLeaveAsk) {
         qwGameLeaveAsk = true;
       } else {
         qwGameLeaveAsk = false;
+        qwGameMenuReturn();
         qwScreen = SCREEN_GAMES_MENU;
       }
     } else if (qwScreen == SCREEN_SETTINGS) {

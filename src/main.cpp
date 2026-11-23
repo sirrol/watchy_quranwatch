@@ -131,6 +131,42 @@ class QuranWatch : public Watchy {
     }
   }
 
+  // ALARMS app: while an alarm rings (5 minutes, until BACK) vibrate its Morse
+  // pattern once per minute.
+  void checkAlarmsVibration() {
+    if (Sac::dismissPending) return;
+    tmElements_t now = effectiveTime();
+    uint32_t dayKey = (uint32_t)(makeTime(now) / 86400);
+    int nowMin = now.Hour * 60 + now.Minute;
+    int i = Alm::ringing(nowMin, dayKey);
+    if (i < 0) return;
+    uint32_t key = dayKey * 1440u + (uint32_t)nowMin + 1u;
+    if (Alm::lastRing == key) return;
+    Alm::lastRing = key;
+    Alm::morse(Alm::MORSE[Alm::patOf(i) % 5]);
+  }
+
+  // TEA TIMER: vibrate when the tea is ready and once more a minute later (until BACK),
+  // then arm the ESP32 timer so the next event wakes the watch at the exact second.
+  void checkTeaVibration() {
+    uint32_t t = (uint32_t)makeTime(effectiveTime());
+    qwGameNow = t;
+    if (Tea::state == 0) return;
+    Tea::check(t, Sac::dismissPending);
+    Tea::armWake(t);
+  }
+
+  // Hifz alarm: vibrate once (double pulse) when "HIFZ TIME" starts, if enabled.
+  void checkHifzAlarmVibration() {
+    Sac::loadAlarm();
+    if (!Sac::alOn || !Sac::alVib) return;
+    tmElements_t now = effectiveTime();
+    uint32_t dayKey = (uint32_t)(makeTime(now) / 86400);
+    if (!Sac::alarmDue(now.Hour * 60 + now.Minute, dayKey) || Sac::alBuzzed == dayKey) return;
+    Sac::alBuzzed = dayKey;
+    qwPrayerBuzz();
+  }
+
   // One pulse when the "<45min" prayer alert appears (once per prayer),
   // if enabled in Settings. Uses the same stage logic as the display.
   void checkPrayerAlertVibration() {
@@ -171,7 +207,8 @@ class QuranWatch : public Watchy {
   void checkReaderTimeout() {
     bool reader = (qwScreen == SCREEN_QURAN_PICK || qwScreen == SCREEN_QURAN_READ);
     bool games = (qwScreen == SCREEN_GAMES_MENU || qwScreen == SCREEN_GAME_PLAY ||
-                  qwScreen == SCREEN_SPIRAL);
+                  qwScreen == SCREEN_SPIRAL || qwScreen == SCREEN_GARDEN ||
+                  qwScreen == SCREEN_TASBIH);
     if (!reader && !games) return;
     int32_t nowMin = (int32_t)(makeTime(effectiveTime()) / 60);
     if (nowMin - qwLastInteractMin >= READER_TIMEOUT_MIN) {
@@ -184,6 +221,9 @@ class QuranWatch : public Watchy {
     checkReaderTimeout();
     checkPrayerVibration();
     checkPrayerAlertVibration();
+    checkHifzAlarmVibration();
+    checkAlarmsVibration();
+    checkTeaVibration();
     checkLowBattery();
 
     AppSettings settings;
@@ -225,6 +265,47 @@ class QuranWatch : public Watchy {
         if (qwSpiralResetAsk) Sp::drawResetBox(display);
         break;
       }
+      case SCREEN_GARDEN: {
+        RTC.read(currentTime);
+        uint32_t nowMin = (uint32_t)(makeTime(currentTime) / 60);  // raw RTC
+        if (Gd::introPending) {  // entering: closed flowers turn (45 degree steps), then open
+          Gd::introPending = 0;
+          int nf = Gd::introCount();
+          for (int f = 0; f < nf; f++) {
+            Gd::drawIntro(display, f, nowMin);
+            display.display(true);
+            delay(60);
+          }
+        }
+        if (Gd::animPending) {  // the oldest flower leaves, today's flower opens
+          Gd::animPending = 0;
+          int nf = Gd::animCount();
+          for (int f = 0; f < nf; f++) {
+            Gd::drawAnim(display, f, nowMin);
+            display.display(true);
+            delay(120);
+          }
+          Gd::evFlag = 0;
+        }
+        Gd::draw(display, nowMin, effectiveTime().Hour);
+        break;
+      }
+      case SCREEN_TASBIH: {
+        RTC.read(currentTime);
+        uint32_t sec = (uint32_t)makeTime(currentTime);  // raw RTC seconds
+        int32_t gap = (int32_t)(sec - Tb::lastSec);
+        bool quick = (gap >= 0 && gap <= 2);  // fast counting: no transition
+        Tb::lastSec = sec;
+        int nf = Tb::animFrames(quick);
+        for (int f = 0; f < nf; f++) {  // the beads slide calmly into place
+          Tb::drawAnim(display, f, quick);
+          display.display(true);
+          delay(30);
+        }
+        Tb::anim = Tb::A_NONE;
+        Tb::draw(display);
+        break;
+      }
       case SCREEN_QURAN_READ:
         QReader::drawPage(display, qrUnit, qrPage);
         break;
@@ -232,8 +313,9 @@ class QuranWatch : public Watchy {
         qwDrawGamesMenu(display);
         break;
       case SCREEN_GAME_PLAY:
+        { tmElements_t te = effectiveTime(); qwGameDay = (uint32_t)(makeTime(te) / 86400); qwGameMin = (uint16_t)(te.Hour * 60 + te.Minute); }
         QW_GAMES[qwGameIndex].draw(display);
-        if (qwGameLeaveAsk) qwDrawLeaveBox(display);
+        if (qwGameLeaveAsk) qwDrawLeaveBox(display, QW_GAMES[qwGameIndex].back != nullptr);
         break;
       case SCREEN_WATCHFACE:
       default: {
@@ -251,6 +333,8 @@ class QuranWatch : public Watchy {
         // after deep sleep on the Watchy).
         time_t utcNow = makeTime(now) - settings.utcOffsetSeconds -
                         (settings.daylightSaving ? 3600 : 0);
+        RTC.read(currentTime);
+        Gd::faceNow = (uint32_t)(makeTime(currentTime) / 60);  // raw RTC, for the dhikr crest
         float batteryVoltage = getBatteryVoltage();
         uint8_t stars =
             quranStarsLeft(utcNow, QWStorage::loadLastReadTime());
@@ -264,6 +348,9 @@ class QuranWatch : public Watchy {
 
   void handleButtonPress() override {
     tmElements_t eff = effectiveTime();
+    qwGameDay = (uint32_t)(makeTime(eff) / 86400);
+    qwGameMin = (uint16_t)(eff.Hour * 60 + eff.Minute);
+    qwGameNow = (uint32_t)makeTime(eff);
 
     QwCommit commit = handleQuranWatchButtons(
         *this, eff.Hour, eff.Minute, eff.Day, eff.Month, eff.Year + 1970);
@@ -314,6 +401,21 @@ class QuranWatch : public Watchy {
       QWStorage::saveSpiralStart((uint32_t)(makeTime(currentTime) / 60));
     }
 
+    if (Gd::kamonDismissPending) {  // BACK on the watch face hides the sakura crest
+      Gd::kamonDismissPending = 0;
+      RTC.read(currentTime);
+      uint32_t rawMin = (uint32_t)(makeTime(currentTime) / 60);
+      int kh = 0, kl = 0, ku = 0;
+      bool kn = false;
+      if (Gd::kamonInfo(rawMin, kh, kl, ku, kn)) Gd::kamonDismiss(rawMin);  // the crest was showing
+      else Sac::dismissPending = 1;  // otherwise hide the sacred month message (UiLayout.h)
+    }
+
+    if (Gd::pendingAdd || Gd::pendingUndo) {  // dhikr garden: apply the entry
+      RTC.read(currentTime);
+      Gd::commit((uint32_t)(makeTime(currentTime) / 60));  // raw RTC minute
+    }
+
     // Remember when the last button was pressed (reader time-out).
     qwLastInteractMin = (int32_t)(makeTime(eff) / 60);
 
@@ -327,6 +429,9 @@ class QuranWatch : public Watchy {
     } else {
       qwPartialCount = 0;
     }
+    // Dhikr bloom animation: its pictures are already partial refreshes, so
+    // the last one must not trigger a flashing full refresh.
+    if (qwScreen == SCREEN_GARDEN && (Gd::introPending || Gd::animPending)) partial = true;
     qwScreenShown = (int8_t)qwScreen;
     showWatchFace(partial);
   }

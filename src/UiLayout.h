@@ -28,6 +28,8 @@
 #include "HijriCalendar.h"
 #include "PrayerTimes.h"
 #include "SurahNames.h"
+#include "Garden.h"
+#include "SacredMonth.h"
 
 #ifndef GxEPD_BLACK
 #define GxEPD_BLACK 0
@@ -369,7 +371,7 @@ static const uint32_t INTER_S_BITS[67][INTER_S_ROWS] = {
     {0x00000000U,0x00000000U,0x70000000U,0x60000000U,0xF0000000U,0x60000000U,0x60000000U,0x60000000U,0x60000000U,0x60000000U,0x00000000U,0x00000000U}, // 'f'
     {0x00000000U,0x00000000U,0x00000000U,0x00000000U,0x34000000U,0x6C000000U,0xCC000000U,0xCC000000U,0x6C000000U,0x7C000000U,0x4C000000U,0x7C000000U}, // 'g'
     {0x00000000U,0x00000000U,0x40000000U,0x40000000U,0x58000000U,0x7C000000U,0x4C000000U,0x4C000000U,0x4C000000U,0x4C000000U,0x00000000U,0x00000000U}, // 'h'
-    {0x00000000U,0x00000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x00000000U,0x00000000U}, // 'i'
+    {0x00000000U,0x00000000U,0x40000000U,0x00000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x00000000U,0x00000000U}, // 'i' (dotted)
     {0x00000000U,0x00000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0xC0000000U,0xC0000000U}, // 'j'
     {0x00000000U,0x00000000U,0x40000000U,0x40000000U,0x4C000000U,0x58000000U,0x70000000U,0x70000000U,0x58000000U,0x4C000000U,0x00000000U,0x00000000U}, // 'k'
     {0x00000000U,0x00000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x40000000U,0x00000000U,0x00000000U}, // 'l'
@@ -440,49 +442,72 @@ inline void drawInterCentered(Adafruit_GFX &d, const char *text, int16_t cx,
 }
 
 // ---------------------------------------------------------------
-// Zone 3: Info - Hijri day + month abbreviation, year, battery.
-// All three lines are centered. Battery line inverts with a "!"
-// once the charge is at or below LOW_BATTERY_PERCENT.
+// Zone 3: Info - Hijri day and year, the month written out in full,
+// battery with a small vertical cell symbol. Everything is centered.
+// The battery line inverts with a "!" once the charge is at or below
+// LOW_BATTERY_PERCENT.
 // ---------------------------------------------------------------
-static const char *HIJRI_MONTH_SHORT[12] = {"Muh", "Saf", "R1",  "R2",
-                                             "J1",  "J2",  "Raj", "Sha",
-                                             "Ram", "Shw", "DQ",  "DH"};
+// Month names without apostrophes or hyphens (the font has neither). A name
+// too long for the zone is split over two lines.
+static const char *const HIJRI_MONTH_L1[12] = {"Muharram", "Safar", "Rabi", "Rabi", "Jumada", "Jumada",
+                                                "Rajab", "Shaban", "Ramadan", "Shawwal", "Dhu al", "Dhu al"};
+static const char *const HIJRI_MONTH_L2[12] = {"", "", "al Awwal", "al Thani", "al Awwal", "al Thani",
+                                                "", "", "", "", "Qadah", "Hijjah"};
+
+// Vertical battery cell, 7 x 14 px, 4 segments (25 / 50 / 75 / 100 %).
+// (x, y) = top left corner.
+inline void drawBatteryCell(Adafruit_GFX &d, int16_t x, int16_t y, uint8_t pct,
+                            uint16_t color) {
+  d.drawFastHLine(x + 2, y, 3, color);          // the tip
+  d.drawRect(x, y + 1, 7, 13, color);           // the body
+  int segs = pct == 0 ? 0 : (pct + 24) / 25;    // 1..4
+  if (segs > 4) segs = 4;
+  for (int i = 0; i < segs; i++)                // filled from the bottom
+    d.fillRect(x + 2, y + 11 - 3 * i, 3, 2, color);
+}
 
 inline void drawZoneInfo(Adafruit_GFX &d, const HijriDate &hijri,
                           float batteryVoltage) {
   using namespace UiZones;
   int16_t cx = (R1_COL2_X0 + R1_COL2_X1) / 2;
   d.setTextColor(qwInk());
+  int m = (hijri.month >= 1 && hijri.month <= 12) ? hijri.month - 1 : -1;
 
-  // Line 1: day + month abbreviation, centered as one block.
-  char dayBuf[4];
-  snprintf(dayBuf, sizeof(dayBuf), "%02d", hijri.day);
-  const char *mon = (hijri.month >= 1 && hijri.month <= 12)
-                        ? HIJRI_MONTH_SHORT[hijri.month - 1]
-                        : "?";
-  char line1[12];
-  snprintf(line1, sizeof(line1), "%s %s", dayBuf, mon);
-  drawInterCentered(d, line1, cx, ROW1_Y0 + 7, true);
-
-  // Line 2: year, centered.
-  char year[8];
+  // Line 1: day (large) and year (small), side by side.
+  char dayBuf[4], year[8];
+  snprintf(dayBuf, sizeof(dayBuf), "%d", hijri.day);
   snprintf(year, sizeof(year), "%04d", hijri.year);
-  drawInterCentered(d, year, cx, ROW1_Y0 + 27, true);
+  int16_t dw = interTextWidth(dayBuf, true), yw = interTextWidth(year, false);
+  const int16_t gap = 5;
+  int16_t x0 = cx - (dw + gap + yw) / 2;
+  drawInterText(d, dayBuf, x0, ROW1_Y0 + 4, true, qwInk());
+  drawInterText(d, year, x0 + dw + gap, ROW1_Y0 + 8, false, qwInk());
 
-  // Line 3: battery, centered. Inverted with "!" when low.
+  // Lines 2-3: the month, in full.
+  if (m >= 0) {
+    if (HIJRI_MONTH_L2[m][0]) {
+      drawInterCentered(d, HIJRI_MONTH_L1[m], cx, ROW1_Y0 + 22, false);
+      drawInterCentered(d, HIJRI_MONTH_L2[m], cx, ROW1_Y0 + 34, false);
+    } else {
+      drawInterCentered(d, HIJRI_MONTH_L1[m], cx, ROW1_Y0 + 28, false);
+    }
+  }
+
+  // Last line: battery cell + percentage. Inverted with "!" when low.
   uint8_t batPct = batteryVoltageToPercent(batteryVoltage);
   bool lowBat = batPct <= LOW_BATTERY_PERCENT;
   char bat[16];
-  int16_t ty = ROW1_Y0 + 49;
+  snprintf(bat, sizeof(bat), lowBat ? "%u%%!" : "%u%%", batPct);
+  int16_t tw = interTextWidth(bat, false);
+  int16_t total = 7 + 4 + tw;
+  int16_t bx = cx - total / 2, by = ROW1_Y0 + 48;
   if (lowBat) {
-    snprintf(bat, sizeof(bat), "BAT %u%%!", batPct);
-    int16_t w = interTextWidth(bat, false);
-    int16_t tx = cx - w / 2;
-    d.fillRect(tx - 3, ty - 3, w + 6, 8 + 6, qwInk());
-    drawInterText(d, bat, tx, ty, false, qwPaper());
+    d.fillRect(bx - 3, by - 2, total + 6, 18, qwInk());
+    drawBatteryCell(d, bx, by, batPct, qwPaper());
+    drawInterText(d, bat, bx + 11, by + 3, false, qwPaper());
   } else {
-    snprintf(bat, sizeof(bat), "BAT %u%%", batPct);
-    drawInterCentered(d, bat, cx, ty, false);
+    drawBatteryCell(d, bx, by, batPct, qwInk());
+    drawInterText(d, bat, bx + 11, by + 3, false, qwInk());
   }
 }
 
@@ -1081,7 +1106,27 @@ inline void drawMainFace(Adafruit_GFX &d, const AppSettings &settings,
   PrayerIndex current = currentPrayerIndex(nowMinutes, prayers);
 
   drawZoneMoon(d, utcNow);
-  drawZoneInfo(d, hijri, batteryVoltage);
+  {  // the sakura crest replaces the info zone while dhikr petals are falling
+    int kh = 0, kl = 0, ku = 0;
+    bool kn = false;
+    if (Gd::kamonInfo(Gd::faceNow, kh, kl, ku, kn)) Gd::drawKamon(d, kh, kl, ku, kn);
+    else {
+      bool zakatDue = settings.zakatOn && hijri.month == settings.zakatMonth && hijri.day == 1 &&
+                      nowMinutes >= prayers.dhuhrMin;
+      uint32_t dayKey = (uint32_t)(gregorianToJDN(gYear, gMonth, gDay) - 2440588L);
+      // eve of the White Days (13, 14, 15): day 12 of the month; not in Dhu al-Hijjah (13th = Tashreeq, no fasting)
+      bool whiteEve = settings.whiteOn && hijri.day == 12 && hijri.month != 12;
+      uint8_t sm = Sac::state(hijri, hour24, zakatDue, nowMinutes, dayKey, whiteEve);  // Hifz alarm / Eid / zakat / sacred month
+      if (sm == Sac::SHOW_TEA) Sac::drawTea(d);
+      else if (sm == Sac::SHOW_ALARM) Sac::drawAlarm(d, Sac::ringIdx);
+      else if (sm == Sac::SHOW_HIFZ) Sac::drawHifz(d);
+      else if (sm == Sac::SHOW_EID) Sac::drawEid(d);
+      else if (sm == Sac::SHOW_ZAKAT) Sac::drawZakat(d);
+      else if (sm == Sac::SHOW_WHITE) Sac::drawWhite(d);
+      else if (sm == Sac::SHOW_SACRED) Sac::draw(d);
+      else drawZoneInfo(d, hijri, batteryVoltage);
+    }
+  }
   drawZoneBookmark(d, bookmark);
   drawZoneStars(d, stars);
   drawZoneHijriGrid(d, hijri);
