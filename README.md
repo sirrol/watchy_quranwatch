@@ -1,8 +1,8 @@
 # QuranWatch
 
-p align="center">
+
   <img src="images/01.jpg" alt="pic.V3" width="300">
-</p>
+
 
 A custom watch face and a set of mini-apps for the **Watchy V2** e-paper
 smartwatch (ESP32, 200 x 200 monochrome screen), built with PlatformIO.
